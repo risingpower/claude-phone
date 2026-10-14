@@ -87,6 +87,20 @@ Out of the box every call uses the Mac's built-in **Daniel** voice (British Engl
 no account. It's the voice in the original demo video. Set `say_voice` in config.toml to change it; `say -v '?'` lists the voices, and better
 "Enhanced" and "Premium" ones download in System Settings → Accessibility → Spoken Content → System Voice.
 
+**Siri voices** sound the most natural of the Mac voices, but `say` can't use them. Download one (System
+Voice → Manage Voices, a voice named "Siri"), then:
+
+```toml
+tts_provider = "siri"
+siri_voice = "Voice 2"      # `phone voices` lists them; empty: the first one in the Mac's language
+operator_provider = "siri"  # the operator on 0
+operator_voice = "Voice 3"
+```
+
+macOS gives Siri voices only to Apple-signed programs, so each render runs the Xcode command line tools' `swift`
+interpreter. That adds about a second to a new phrase; repeated phrases come from the cache. If it fails, that
+call falls back to `say_voice`.
+
 The other demo clips use **Jessica** from the ElevenLabs voice library. To use her, or any ElevenLabs voice:
 
 ```toml

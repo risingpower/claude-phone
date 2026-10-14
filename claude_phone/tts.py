@@ -37,6 +37,17 @@ class Say(Provider):
             _to_wav16(aiff, out_wav)
 
 
+class Siri(Provider):
+    name = "siri"
+
+    def render(self, text: str, voice: str | None, out_wav: Path) -> None:
+        from . import siri
+        with tempfile.TemporaryDirectory() as td:
+            caf = Path(td) / "t.caf"
+            siri.render(text, voice or config.load().siri_voice, caf)
+            _to_wav16(caf, out_wav)
+
+
 class ElevenLabs(Provider):
     name = "elevenlabs"
     model: str | None = None  # None: elevenlabs_model from config
@@ -72,7 +83,7 @@ def _write_wav(path: Path, pcm: bytes, rate: int) -> None:
         w.writeframes(pcm)
 
 
-PROVIDERS: dict[str, Provider] = {p.name: p for p in (Say(), ElevenLabs(), ElevenLabsV3())}
+PROVIDERS: dict[str, Provider] = {p.name: p for p in (Say(), Siri(), ElevenLabs(), ElevenLabsV3())}
 
 
 def voice_for(repo: str | None) -> tuple[str, str | None]:
@@ -87,7 +98,7 @@ def render(text: str, repo: str | None = None, voice: tuple[str, str | None] | N
     provider, voice = voice or voice_for(repo)
     if not voice:  # name the default voice in the cache key, so changing it in config isn't masked by old speech
         s = config.load()
-        voice = s.say_voice if provider == "say" else s.elevenlabs_voice_id
+        voice = {"say": s.say_voice, "siri": s.siri_voice}.get(provider, s.elevenlabs_voice_id)
     key = hashlib.sha256(json.dumps([provider, voice, text]).encode()).hexdigest()[:20]
     base = config.SOUNDS / "tts" / key
     out = base.with_suffix(".wav16")
@@ -173,7 +184,7 @@ def phrase(key: str, repo: str | None = None, **kw) -> str:
 
 
 def spoken_label(label: str) -> str:
-    """'lemon-stand/feat/ags-2' -> 'lemon stand, feat ags 2' so say/ElevenLabs read it naturally."""
+    """'lemon-stand/feat/ags-2' -> 'lemon stand, feat ags 2' so say/Siri/ElevenLabs read it naturally."""
     repo, _, branch = label.partition("/")
     clean = lambda x: " ".join(x.replace("-", " ").replace("_", " ").replace("/", " ").split())
     return f"{clean(repo)}, {clean(branch)}" if branch else clean(repo)

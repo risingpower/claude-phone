@@ -9,9 +9,10 @@ voicemail_ext = "500"
 ring_seconds = 25       # keep ring + record + transcribe under Claude Code's 120 s auto-background
 record_seconds = 60
 callerid_max = 18
-tts_provider = "say"    # or "elevenlabs" (ELEVENLABS_API_KEY or keychain claude-phone/elevenlabs)
+tts_provider = "say"    # or "siri", or "elevenlabs" (ELEVENLABS_API_KEY or keychain claude-phone/elevenlabs)
 say_voice = "Daniel"
-operator_provider = "say"  # dial 0; "elevenlabs" with an ElevenLabs voice id below
+# siri_voice = "Voice 2"  # tts_provider = "siri": a name, identifier or language from `phone voices`
+operator_provider = "say"  # dial 0; "siri" with a Siri voice, "elevenlabs" with an ElevenLabs voice id
 operator_voice = "Shelley (English (UK))"
 
 # Per-repo voices

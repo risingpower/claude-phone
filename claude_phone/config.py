@@ -53,6 +53,8 @@ class Settings:
     callerid_max: int = 17  # T31P shows 17 chars before scrolling (tested 2026-10-09)
     tts_provider: str = "say"
     say_voice: str = "Daniel"
+    # tts_provider = "siri": a Siri voice's identifier, name ("Voice 2") or language. Empty: the Mac's language.
+    siri_voice: str = ""
     # Yealink Push XML: summaries of calls and meetings on the desk phone's screen. The phone must list lan_ip
     # as its Push XML Server. desk_ip: empty means the address the phone registered from.
     screen_push: bool = False

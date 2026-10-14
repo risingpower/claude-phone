@@ -19,5 +19,8 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 packages = ["claude_phone"]
 
+[tool.setuptools.package-data]
+claude_phone = ["siri.swift"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

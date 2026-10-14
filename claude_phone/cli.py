@@ -323,6 +323,20 @@ def cmd_say(a) -> None:
     print(tts.render(a.text))
 
 
+def cmd_voices(a) -> None:
+    from . import siri
+    try:
+        found = siri.voices()
+    except (OSError, RuntimeError) as e:
+        print(e)
+        return
+    for ident, name, lang in found:
+        print(f"{name}\t{lang}\t{ident}")
+    if not found:
+        print("No Siri voices: System Settings → Accessibility → Spoken Content → System Voice → Manage Voices.")
+    print("`say -v '?'` lists the say voices.")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="phone")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -353,6 +367,7 @@ def main() -> None:
     sp = sub.add_parser("say", help="render text to speech, print the media URI")
     sp.add_argument("text")
     sp.set_defaults(fn=cmd_say)
+    sub.add_parser("voices", help="installed Siri voices, for siri_voice").set_defaults(fn=cmd_voices)
     sub.add_parser("meeting-test", help="preview a meeting alert (whisper and screen)").set_defaults(fn=cmd_meeting_test)
     sub.add_parser("meetings", help="upcoming meetings the alerts will use").set_defaults(fn=cmd_meetings)
     sub.add_parser("config", help="regenerate Asterisk config").set_defaults(fn=lambda a: render_asterisk_config())

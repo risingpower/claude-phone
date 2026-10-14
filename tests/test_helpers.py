@@ -77,3 +77,16 @@ def test_changing_the_default_voice_renders_new_speech(monkeypatch):
     monkeypatch.setattr(config, "load", lambda: Settings(say_voice="Fiona"))
     b = tts.render("Hello there.")
     assert a != b and rendered == ["Daniel", "Fiona"]
+
+
+def test_siri_falls_back_to_say(monkeypatch):
+    from claude_phone import config
+
+    def broken(text, voice, out):
+        raise RuntimeError("no Siri voice installed")
+    said = []
+    monkeypatch.setattr(tts.PROVIDERS["siri"], "render", broken)
+    monkeypatch.setattr(tts.PROVIDERS["say"], "render", lambda text, voice, out: (said.append(text), out.write_bytes(b"")))
+    monkeypatch.setattr(config, "load", lambda: Settings(tts_provider="siri", siri_voice="Voice 2"))
+    assert tts.render("Hello there.").startswith("sound:")
+    assert said == ["Hello there."]
