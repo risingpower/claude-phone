@@ -180,12 +180,14 @@ def spoken_label(label: str) -> str:
 
 
 OPERATOR = {
-    "greeting": "Operator! Number please. Who would you like to speak to?",
+    "greeting": "Operator, how can I help?",
     "connecting": "Putting you through to {label}. Hold the line.",
     "which": "I've got {options}. Which one would you like?",
     "unplaced": "Sorry caller, I can't place that one. Try dialling the extension directly. Goodbye!",
     "again": "Sorry caller, I didn't catch that. Who was it you wanted?",
     "nobody": "Sorry caller, there's nobody on the switchboard right now. Goodbye!",
+    "else": "Anything else?",
+    "bye": "Righto. Goodbye!",
     "hold": "{label} is busy on a task. Please hold, and I'll put you through the moment it's done. "
             "Or press hash to leave your message now.",
     "important": "Your call is important to us. Please continue to hold, or press hash to leave your message now.",

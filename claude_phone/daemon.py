@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import time
@@ -13,7 +14,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from . import config, diary, hold, housekeeping, inject, keychain, log, push, registry, safe, screen, stt, tts
+from . import config, diary, hold, housekeeping, inject, keychain, lights, log, push, registry, safe, screen, stt, tts
 from .ari import ARI, Call, Hangup
 
 lg = log.get("daemon")
@@ -98,6 +99,8 @@ class Controller:
         self.released: set[str] = set()  # meetings whose hold was ended early with the DND key
         self.phone_dnd = False  # the phone's DND key, as reported by its Action URLs
         self.dnd_ours = False  # we switched the phone's DND on for a meeting, so we switch it off after
+        self.load_dnd()
+        self.lights = lights.Lights(self.s)
 
     # --- lifecycle ---
 
@@ -136,9 +139,12 @@ class Controller:
         held = max(ms, key=lambda m: m.end) if ms else None
         if bool(held) != bool(self.meeting):
             lg.info("meeting window %s", f"until {held.end:%H:%M} ({held.title})" if held else "over")
+            if held:  # the lamps are in shot: normal white for the meeting, and no effects until it's over
+                asyncio.create_task(self.lights.apply(lights.Command("mode", "normal")))
         self.meeting, self.window = held, {m.key for m in ms}
         if not held and self.dnd_ours:
             self.dnd_ours = False
+            self.save_dnd()
             if self.phone_dnd:
                 await screen.press("DNDOff")
         for m in ms:
@@ -156,7 +162,38 @@ class Controller:
             await self.whisper(self.s.whisper_text, title)
         if dnd and not self.phone_dnd and await screen.press("DNDOn"):
             self.dnd_ours = True
+            self.save_dnd()
         await screen.show(title, text, timeout=int((m.start - now).total_seconds()) + 300)
+
+    def save_dnd(self) -> None:
+        """DND state survives a daemon restart, so a meeting released with the DND key stays released.
+        Releases are dropped a day after their meeting started (keys end in the start time), unless the
+        meeting is still in the current window."""
+        cutoff = (datetime.now().astimezone() - timedelta(days=1)).isoformat()
+        self.released = {k for k in self.released if k in self.window or k.rpartition("@")[2] >= cutoff}
+        state = {"phone_dnd": self.phone_dnd, "dnd_ours": self.dnd_ours, "released": sorted(self.released)}
+        try:
+            (config.HOME / "dnd.json").write_text(json.dumps(state))
+        except OSError as e:
+            lg.warning("couldn't save DND state: %r", e)
+
+    def load_dnd(self) -> None:
+        try:
+            state = json.loads((config.HOME / "dnd.json").read_text())
+        except (OSError, ValueError):
+            return
+        self.phone_dnd, self.dnd_ours = bool(state.get("phone_dnd")), bool(state.get("dnd_ours"))
+        self.released = set(state.get("released") or [])
+
+    def light_effect(self, kind: str, **kw) -> None:
+        """Lights effects stay out of meetings, as the lamps are behind the owner on camera, unless the DND key
+        ended the meeting's hold."""
+        if self.meeting and not self.window <= self.released:
+            return
+        try:
+            self.lights.effect(kind, **kw)
+        except Exception as e:
+            lg.warning("lights effect %s failed: %r", kind, e)
 
     def hold_reason(self) -> str | None:
         """Why Claude's calls are held right now, if they are: the phone's DND key, or a meeting whose
@@ -172,6 +209,7 @@ class Controller:
         if not on:
             self.dnd_ours = False
             self.released |= self.window  # DND off during a meeting ends its hold
+        self.save_dnd()
         lg.info("phone DND %s; calls %s", "on" if on else "off", f"held ({self.hold_reason()})" if self.hold_reason() else "not held")
 
     async def sweeper(self) -> None:
@@ -277,27 +315,43 @@ class Controller:
     # --- me ringing a session ---
 
     async def operator(self, call: Call) -> None:
-        """Dial 0: say who you want; the operator matches it to a live session and puts you through."""
+        """Dial 0: say who you want and the operator puts you through to that session, or ask for the lights
+        ("lights off", "red", "party mode"). After a lights request she listens for another."""
         from . import operator
         sessions = registry.all_sessions()
-        if not sessions:
-            await call.play(tts.op(tts.OPERATOR["nobody"]))
-            return
         await call.play(tts.op(tts.OPERATOR["greeting"]), tts.beep())
-        candidates = sessions
-        for attempt in range(2):
-            name = f"op-{int(time.time())}-{attempt}"
+        candidates, misses, done = sessions, 0, 0
+        while misses < 2 and done < 6:
+            name = f"op-{int(time.time())}-{misses}-{done}"
             # Stops after a 2 s pause: nobody hangs up on the operator.
             await call.record(name, 10, max_silence=2)
-            heard = await self.transcribe(name) or ""
-            hit, candidates = operator.match(heard, candidates)
-            lg.info("operator heard %r -> %s (candidates %s)", heard, hit and hit.ext, [c.ext for c in candidates])
+            heard = await self.transcribe(name, lights.VOCABULARY) or ""
+            if done and (not heard or lights.finished(heard)):
+                await call.play(tts.op(tts.OPERATOR["bye"]))
+                return
+            # A request that names the lights is about the lights: "turn the lights back on" isn't the backend.
+            # Naming the lights makes it a lights request; otherwise a session first. After one lights command,
+            # "turn them back on" is about the lights too.
+            command = lights.parse(heard)
+            if command and lights.mentions_lights(heard):
+                hit = None
+            else:
+                hit, candidates = operator.match(heard, candidates) if candidates else (None, [])
+                command = None if hit else lights.parse(f"lights {heard}" if done else heard)
+            lg.info("operator heard %r -> %s%s (candidates %s)", heard, hit and hit.ext,
+                    f" lights {command.kind}" if command else "", [c.ext for c in candidates])
             if hit:
                 said = await tts.op_async(tts.OPERATOR["connecting"].format(label=tts.spoken_label(hit.label)))
                 await call.play(said)
                 await self.dial_session(call, hit.ext)
                 return
-            if attempt == 1:
+            if command:
+                said = await self.lights.apply(command)
+                await call.play(await tts.op_async(f"{said} {tts.OPERATOR['else']}"), tts.beep())
+                candidates, misses, done = sessions, 0, done + 1
+                continue
+            misses += 1
+            if misses == 2:
                 break
             if not candidates:
                 candidates = sessions
@@ -305,7 +359,7 @@ class Controller:
                 continue
             options = " or ".join(f"{tts.spoken_label(c.label)}, extension {c.ext}" for c in candidates[:3])
             await call.play(await tts.op_async(tts.OPERATOR["which"].format(options=options)), tts.beep())
-        await call.play(tts.op(tts.OPERATOR["unplaced"]))
+        await call.play(tts.op(tts.OPERATOR["unplaced" if sessions else "nobody"]))
 
     async def dial_session(self, call: Call, ext: int, prefix: str = "", source: str = "") -> str | None:
         """Greet, record, transcribe, type into the session. Returns what was sent (None if nothing)."""
@@ -411,6 +465,7 @@ class Controller:
                         if not game.over:
                             await screen.push(self.safe_board(game), "safe board")
                 if game.won:
+                    self.light_effect("party", seconds=20)
                     new_best = not demo and safe.record(len(game.tries))  # a known code doesn't count
                     lg.info("safe: cracked in %s tries%s", len(game.tries), " (best)" if new_best else "")
                 else:
@@ -474,7 +529,7 @@ class Controller:
             await call.play(await tts.render_async(
                 tts.PHRASES["allhands_sent"].format(n=sent, sessions="session" if sent == 1 else "sessions")))
 
-    async def transcribe(self, name: str) -> str | None:
+    async def transcribe(self, name: str, extra: str = "") -> str | None:
         """Transcript ('' if silent), or None on failure."""
         path = recording_path(name)
         for _ in range(20):  # the file is finalised just after hangup
@@ -485,7 +540,7 @@ class Controller:
             lg.warning("recording %s missing", path)
             return ""
         try:
-            text = await stt.transcribe(path)
+            text = await stt.transcribe(path, extra)
             lg.info("transcript %s: %r", name, text)
             return text
         except Exception as e:
@@ -531,6 +586,8 @@ class Controller:
                        "PJSIP_HEADER(add,Call-Info)": "<sip:127.0.0.1>;answer-after=0"}
         else:
             headers = {"PJSIP_HEADER(add,Alert-Info)": f"<http://127.0.0.1>;info=Ring{ringtone(c['repo'], self.s.repo_ringtones)}"}
+        if not auto_answer:
+            self.light_effect("pulse", until=answered, seconds=self.s.ring_seconds)
         await self.ari.post("/channels", channelId=chan_id, endpoint=f"PJSIP/{self.s.ring_ext}",
                             app="claude-phone", appArgs="outbound",
                             callerId=f'"{cid}" <{c["ext"] or ""}>', timeout=self.s.ring_seconds,
@@ -852,6 +909,16 @@ class Controller:
                                        ("Sarah Jones", "Dan Smith")), now, dnd=False)
         return web.json_response({"ok": True})
 
+    async def http_lights(self, request: web.Request) -> web.Response:
+        """`phone lights <words>`: the same commands the operator takes."""
+        text = (await request.json()).get("text") or ""
+        if text.split()[-1:] == ["find"]:
+            return web.json_response({"lights": await self.lights.find(fresh=True)})
+        command = lights.parse(text)
+        if not command:
+            return web.json_response({"error": f"not a lights command: {text!r}"}, status=400)
+        return web.json_response({"said": await self.lights.apply(command), "lights": self.lights.ips})
+
     async def http_health(self, request: web.Request) -> web.Response:
         return web.json_response({"ok": True, "ip_warning": config.ip_warning(), "ari": self.ari.connected.is_set(),
                                   "desk_online": await self.desk_online(), "line_busy": self.line.locked()})
@@ -867,6 +934,7 @@ async def main() -> None:
     app.router.add_post("/transfer", c.http_transfer)
     app.router.add_post("/whisper", c.http_whisper)
     app.router.add_post("/meeting-test", c.http_meeting_test)
+    app.router.add_post("/lights", c.http_lights)
     app.router.add_get("/health", c.http_health)
     runner = web.AppRunner(app)
     await runner.setup()

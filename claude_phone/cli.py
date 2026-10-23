@@ -10,6 +10,7 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -312,6 +313,17 @@ def cmd_meeting_test(a) -> None:
         print(json.loads(r.read()))
 
 
+def cmd_lights(a) -> None:
+    text = "lights " + " ".join(a.words)  # `phone lights on` reads as "lights on"
+    req = urllib.request.Request(f"{config.load().daemon_url}/lights", data=json.dumps({"text": text}).encode(),
+                                 method="POST", headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            print(json.loads(r.read()))
+    except urllib.error.HTTPError as e:
+        raise SystemExit(json.loads(e.read()).get("error"))
+
+
 def cmd_meetings(a) -> None:
     from datetime import datetime, timedelta
     from . import diary
@@ -367,6 +379,9 @@ def main() -> None:
     sp.set_defaults(fn=cmd_safe_code)
     sub.add_parser("meeting-test", help="preview a meeting alert (whisper and screen)").set_defaults(fn=cmd_meeting_test)
     sub.add_parser("meetings", help="upcoming meetings the alerts will use").set_defaults(fn=cmd_meetings)
+    sp = sub.add_parser("lights", help="Govee lights: on, off, red, 50 percent, focus, party... or find")
+    sp.add_argument("words", nargs="+")
+    sp.set_defaults(fn=cmd_lights)
     sub.add_parser("config", help="regenerate Asterisk config").set_defaults(fn=lambda a: render_asterisk_config())
     a = p.parse_args()
     a.fn(a)

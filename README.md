@@ -36,7 +36,7 @@ are text to ElevenLabs, if you choose it, and missed-call pushes, if you set the
 | 301-399 | live Claude Code sessions (`phone list`). Mid-task, you get hold music until its turn ends; # leaves your message now |
 | 200 | T31P |
 | 201 | Linphone (testing) |
-| 0 | operator: say who you want ("the backend on the AGS branch") and it puts you through |
+| 0 | operator: say who you want ("the backend on the AGS branch") and it puts you through. Or ask for the lights: "lights off", "red", "fifty percent", "focus", "party mode" (Govee lights with LAN Control on in the Govee app; also `phone lights <words>`). The lights also pulse while Claude rings and party when the safe is cracked, then go back as they were; in meetings they stay on normal white, since they're in shot |
 | 9 | all-hands: your message is typed into every live session |
 | 7233 | Crack the Safe (S-A-F-E): find the 4-digit code in 8 tries; type 4 digits then #, the board shows after each guess while a guard heckles; Exit closes it to type the next one. Needs `screen_push` |
 | 500 | voicemail (T31P Message key) |

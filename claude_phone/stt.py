@@ -33,17 +33,18 @@ def speech_seconds(path: Path, threshold: int = 200) -> float:
     return voiced / 50
 
 
-def vocabulary() -> str:
-    """Prompt whisper with live repo and branch names so it spells them right."""
+def vocabulary(extra: str = "") -> str:
+    """Prompt whisper with live repo and branch names (and any extra words expected) so it spells them right."""
     words: set[str] = set()
     for s in registry.all_sessions():
         for part in (s.repo, s.branch, s.worktree):
             if part:
                 words.add(part.replace("-", " ").replace("/", " "))
-    return ("Claude Code. " + ", ".join(sorted(words)) + ".") if words else "Claude Code."
+    listed = [*sorted(words), *([extra] if extra else [])]
+    return ("Claude Code. " + ", ".join(listed) + ".") if listed else "Claude Code."
 
 
-async def transcribe(path: Path) -> str:
+async def transcribe(path: Path, extra: str = "") -> str:
     """Returns the transcript, or '' when nothing was said."""
     lg = log.get("stt")
     voiced = speech_seconds(path)
@@ -55,7 +56,7 @@ async def transcribe(path: Path) -> str:
     form.add_field("file", path.read_bytes(), filename="audio.wav", content_type="audio/wav")
     form.add_field("response_format", "json")
     form.add_field("temperature", "0.0")
-    form.add_field("prompt", vocabulary())
+    form.add_field("prompt", vocabulary(extra))
     async with aiohttp.ClientSession() as http:
         async with http.post(f"{s.whisper_url}/inference", data=form, timeout=aiohttp.ClientTimeout(total=30)) as r:
             r.raise_for_status()

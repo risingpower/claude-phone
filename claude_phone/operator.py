@@ -61,6 +61,8 @@ def score(text: str, s: Session) -> float:
     names = _name_tokens(s)
     total = 0.0
     for i, w in enumerate(words):
+        if w == "back" and words[i + 1:i + 2] != ["end"]:
+            continue  # "back end" is the backend; "turn them back on" isn't
         cands = SYNONYMS.get(w, {w})
         best = 0.0
         for c in cands:

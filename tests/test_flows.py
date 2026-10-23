@@ -40,6 +40,17 @@ def ctl(monkeypatch):
     c.line = asyncio.Lock()
     c.meeting, c.window, c.released, c.phone_dnd, c.dnd_ours = None, set(), set(), False, False
 
+    class Lamps:  # records what the lamps were told
+        def __init__(self):
+            self.done = []
+
+        async def apply(self, command):
+            self.done.append((command.kind, command.value))
+
+        def effect(self, kind, **kw):
+            self.done.append(("effect", kind))
+    c.lights = Lamps()
+
     async def no_key(key):
         return False
     monkeypatch.setattr(daemon.screen, "press", no_key)
@@ -179,6 +190,13 @@ def test_meeting_whispers_once_shows_screen_and_holds_calls(ctl, monkeypatch):
     assert whispered == [f"{m.start:%H:%M} Board review"]
     assert shown == [(f"{m.start:%H:%M} Board review", f"with Sarah, Dan\nDND until {m.end:%H:%M}")]
     assert ctl.meeting == m
+    assert ctl.lights.done == [("mode", "normal")]  # once, at the start of the window
+    ctl.light_effect("pulse")
+    assert ctl.lights.done == [("mode", "normal")]  # no effects in a meeting
+    ctl.set_phone_dnd(False)  # the DND key ends the meeting's hold, and lets effects back in
+    ctl.light_effect("pulse")
+    assert ctl.lights.done[-1] == ("effect", "pulse")
+    ctl.released.clear()
 
     registry.register("s", "repo", "main", None, "/r", "tab")
     res = run(ctl.call_owner({"question": "Merge it", "session_id": "s"}))
@@ -232,6 +250,10 @@ def test_dnd_key_off_ends_a_meeting_hold_and_on_holds_calls(ctl, monkeypatch):
     assert ctl.hold_reason() == "in a meeting"
     ctl.set_phone_dnd(False)  # DND key off: the meeting finished early
     assert ctl.hold_reason() is None
+    again = daemon.Controller.__new__(daemon.Controller)  # a daemon restart keeps the release
+    again.load_dnd()
+    again.meeting, again.window = ctl.meeting, ctl.window
+    assert again.released == ctl.released and again.hold_reason() is None
     ctl.set_phone_dnd(True)
     assert ctl.hold_reason() == "in a meeting"
     monkeypatch.setattr(diary, "window", lambda *a: [])
